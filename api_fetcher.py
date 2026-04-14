@@ -32,7 +32,7 @@ except ImportError:
 
 CACHE_DIR = Path(__file__).parent / ".api_cache"
 CACHE_DIR.mkdir(exist_ok=True)
-CACHE_TTL = 1800   # 30 minutes
+CACHE_TTL = 300   # 5 minutes — fresher odds for better accuracy
 
 
 # ── Cache helpers ─────────────────────────────────────────────────────────────

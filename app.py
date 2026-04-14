@@ -27,6 +27,13 @@ try:
 except ImportError:
     _API_FETCHER_AVAILABLE = False
 
+# Live crypto data
+try:
+    from crypto_live import fetch_live_crypto_signals, fetch_meme_live, fetch_crypto_prices
+    _CRYPTO_LIVE = True
+except ImportError:
+    _CRYPTO_LIVE = False
+
 st.set_page_config(page_title="Alpha Bot", page_icon="💰", layout="wide",
                    initial_sidebar_state="collapsed")
 
@@ -364,7 +371,7 @@ def _synthetic_soccer_games(n=60):
     return games
 
 
-@st.cache_data(ttl=1800)   # cache real API data for 30 minutes
+@st.cache_data(ttl=300)   # cache real API data for 5 minutes
 def gen_soccer_games(_n=60):
     """
     Try real API data first, fall back to synthetic.
@@ -375,6 +382,24 @@ def gen_soccer_games(_n=60):
         if real:
             return real, source
     return _synthetic_soccer_games(_n), "🟡 Demo · Set ODDS_API_KEY or RAPIDAPI_KEY for real data"
+
+@st.cache_data(ttl=120)
+def gen_live_crypto():
+    """Fetch real crypto signals from CoinGecko."""
+    if _CRYPTO_LIVE:
+        signals, source = fetch_live_crypto_signals()
+        if signals:
+            return signals, source
+    return gen_crypto_signals(12), "🟡 Demo crypto data"
+
+@st.cache_data(ttl=120)
+def gen_live_meme():
+    """Fetch real meme coin data from CoinGecko."""
+    if _CRYPTO_LIVE:
+        signals, source = fetch_meme_live()
+        if signals:
+            return signals, source
+    return gen_meme_signals(8), "🟡 Demo meme data"
 
 def gen_meme_signals(n=8):
     syms = ["PEPE2","WOJAK","CHAD","BONK","TURBO","FLOKI","DEGEN","SHIB2",
@@ -822,6 +847,13 @@ def render_sig(sig, engine="generic"):
 def main():
     random.seed(int(time.time()) // 60)   # refresh every minute
 
+    # ── Auto-refresh every 60 seconds for live data
+    if "last_refresh" not in st.session_state:
+        st.session_state["last_refresh"] = time.time()
+    elapsed = time.time() - st.session_state["last_refresh"]
+    refresh_interval = 60  # seconds
+    remaining = max(0, int(refresh_interval - elapsed))
+
     # ── Top Nav
     now = datetime.utcnow().strftime("%d %b %Y  %H:%M UTC")
 
@@ -836,7 +868,8 @@ def main():
 
     has_odds_key     = bool(os.getenv("ODDS_API_KEY",""))
     has_rapidapi_key = bool(os.getenv("RAPIDAPI_KEY",""))
-    is_live          = "Live" in _data_source or "🟢" in _data_source or "🟡" in _data_source
+    is_live          = "Live" in _data_source or "🟢" in _data_source
+    crypto_live_ok   = _CRYPTO_LIVE
 
     if is_live:
         api_dot   = '<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#10b981;margin-right:5px;animation:pulse 1.6s ease-in-out infinite"></span>'
@@ -863,10 +896,12 @@ def main():
         )
     else:
         src_short = _data_source.split("·")[-1].strip() if "·" in _data_source else _data_source
-        st.caption(f"⚡ {_data_source}  ·  cache refreshes every 30 min  ·  {len(soccer)} fixtures loaded")
+        st.caption(f"⚡ {_data_source}  ·  auto-refresh {remaining}s  ·  {len(soccer)} fixtures loaded")
     arb      = gen_arbitrage(8)
-    meme     = gen_meme_signals(8)
-    crypto   = gen_crypto_signals(12)
+
+    # ── Live crypto & meme data from CoinGecko ──
+    crypto, _crypto_src = gen_live_crypto()
+    meme, _meme_src = gen_live_meme()
     btts     = gen_btts(soccer, 15)
     ou       = gen_over_under(soccer, 15)
     yields   = gen_yield_farms()
@@ -1183,6 +1218,7 @@ def main():
     # ── TAB 6 — Memecoins ───────────────────────────────────────────────────
     with tabs[5]:
         st.markdown('<div class="sec-head"><span class="sec-icon">🪙</span>Memecoin Sniper</div>', unsafe_allow_html=True)
+        st.caption(f"⚡ {_meme_src}")
         st.markdown('<div class="sig-grid">', unsafe_allow_html=True)
         for m in f_meme:
             render_sig(m, "meme")
@@ -1191,6 +1227,7 @@ def main():
     # ── TAB 7 — Crypto ──────────────────────────────────────────────────────
     with tabs[6]:
         st.markdown('<div class="sec-head"><span class="sec-icon">📈</span>Crypto Swing Signals</div>', unsafe_allow_html=True)
+        st.caption(f"⚡ {_crypto_src}  ·  Real RSI / MACD / Bollinger Bands from price history")
 
         col_buy, col_sell = st.columns(2)
         buys  = [c for c in f_crypto if c["action"]=="BUY"]
@@ -1507,6 +1544,25 @@ def main():
             st.markdown('<div class="empty-state">No predictions match current filters.</div>', unsafe_allow_html=True)
 
         st.caption(f"Showing {len(page_recs)} of {len(h_filt)} predictions · Page {page+1}/{total_pages}")
+
+    # ── Auto-refresh footer ──────────────────────────────────────────────────
+    st.markdown("---")
+    col_r1, col_r2, col_r3 = st.columns([1, 1, 3])
+    with col_r1:
+        if st.button("🔄 Refresh Now", use_container_width=True):
+            st.session_state["last_refresh"] = time.time()
+            st.cache_data.clear()
+            st.rerun()
+    with col_r2:
+        st.caption(f"⏱ Next auto-refresh in {remaining}s")
+    with col_r3:
+        st.caption("💡 Crypto data: CoinGecko (free, no key) · Soccer: The Odds API · Auto-refresh every 60s")
+
+    # Trigger auto-rerun
+    if elapsed >= refresh_interval:
+        st.session_state["last_refresh"] = time.time()
+        st.cache_data.clear()
+        st.rerun()
 
 
 if __name__ == "__main__":
